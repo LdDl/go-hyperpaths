@@ -24,17 +24,26 @@ func (pq *PriorityQueue) Push(x interface{}) {
 }
 
 func (pq *PriorityQueue) Pop() interface{} {
+	n := len(*pq)
+	if n == 0 {
+		return nil
+	}
 	old := *pq
-	n := len(old)
-	item := old[n-1]
-	old[n-1] = nil  // don't stop the GC from reclaiming the item eventually
-	item.index = -1 // for safety
+	first := old[0]
+	last := old[n-1]
+	old[0] = last
+	last.index = 0
 	*pq = old[0 : n-1]
-	return item
+	pq.siftDown(0)
+	first.index = -1
+	return first
 }
 
 func (pq PriorityQueue) Init() {
-	for i := len(pq)/2 - 1; i >= 0; i-- {
+	half := len(pq) / 2
+	for i := half - 1; i >= 0; i-- {
+		pq[i].index = i
+		pq[i+half].index = i + half
 		pq.siftDown(i)
 	}
 }

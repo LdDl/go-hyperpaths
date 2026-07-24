@@ -1,7 +1,6 @@
 package hyperpaths
 
 import (
-	"container/heap"
 	"fmt"
 	"math"
 )
@@ -86,7 +85,7 @@ func FindOptimalStrategy(allLinks []*Link, allStops map[string]struct{}, destina
 		if Verbose {
 			pq.Print()
 		}
-		entry := heap.Pop(&pq).(*pqEntry)
+		entry := pq.Pop().(*pqEntry)
 		if math.IsInf(entry.priority, 1) {
 			break
 		}

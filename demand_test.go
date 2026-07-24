@@ -7,7 +7,6 @@ import (
 )
 
 func TestAssignDemand(t *testing.T) {
-	// Test right from the paper
 	allNodes := map[string]struct{}{
 		"A": {},
 		"X": {}, "X2": {},
@@ -27,42 +26,42 @@ func TestAssignDemand(t *testing.T) {
 		{"Y3", "B", "Line 3", 4, 0},
 	}
 	destinationNode := "B"
-	odMatrix := map[string]map[string]float32{
+	odMatrix := map[string]map[string]float64{
 		"A": {
 			"B": 1,
 		},
 	}
 	optimalStrategy := Strategy{
-		Labels: map[string]float32{
+		Labels: map[string]float64{
 			"A":  27.75,
-			"X":  19.071426,
+			"X":  19.071428571428573,
 			"X2": 17.5,
-			"Y":  11.500001,
+			"Y":  11.5,
 			"Y3": 4,
 			"B":  0,
 		},
-		Freqs: map[string]float32{
-			"A":  0.33333334,
-			"X":  0.23333335,
-			"X2": 1e+11,
+		Freqs: map[string]float64{
+			"A":  1.0 / 3.0,
+			"X":  7.0 / 30.0,
+			"X2": infiniteFrequency,
 			"Y":  0.4,
-			"Y3": 1e+11,
+			"Y3": infiniteFrequency,
 			"B":  0,
 		},
 		ASet: []*Link{
-			allLinks[9],
-			allLinks[6],
-			allLinks[8],
-			allLinks[7],
-			allLinks[4],
-			allLinks[1],
-			allLinks[0],
-			allLinks[3],
+			allLinks[9], // Y3->B
+			allLinks[8], // Y->Y3
+			allLinks[7], // X->Y3
+			allLinks[6], // Y->B
+			allLinks[4], // X2->Y
+			allLinks[3], // X->X2
+			allLinks[1], // A->X2
+			allLinks[0], // A->B
 		},
 	}
 	volumes := AssignDemand(allLinks, allNodes, &optimalStrategy, odMatrix, destinationNode)
 	correctVolumes := Volumes{
-		Links: map[string]map[string]float32{
+		Links: map[string]map[string]float64{
 			"A": {
 				"B":  0.5,
 				"X2": 0.5,
@@ -76,26 +75,26 @@ func TestAssignDemand(t *testing.T) {
 				"Y3": 0.0,
 			},
 			"Y": {
-				"Y3": 0.083333336,
-				"B":  0.4166667,
+				"Y3": 1.0 / 12.0,
+				"B":  5.0 / 12.0,
 			},
 			"Y3": {
 				"Y": 0.0,
-				"B": 0.083333336,
+				"B": 1.0 / 12.0,
 			},
 		},
-		Nodes: map[string]float32{
+		Nodes: map[string]float64{
 			"A":  1.0,
 			"X2": 0.5,
 			"X":  0.0,
-			"Y3": 0.083333336,
+			"Y3": 1.0 / 12.0,
 			"Y":  0.5,
 			"B":  0.0,
 		},
 	}
 	assert.Equal(t, len(volumes.Links), len(correctVolumes.Links), "Incorrect number of links in volumes data")
 	assert.Equal(t, len(volumes.Nodes), len(correctVolumes.Nodes), "Incorrect number of nodes in volumes data")
-	const eps = 1e-6
+	const eps = 1e-9
 	for fromNode := range volumes.Links {
 		assert.Contains(t, correctVolumes.Links, fromNode, "No 'FromNode' in correct volumes data")
 		for toNode, volume := range volumes.Links[fromNode] {
@@ -105,6 +104,6 @@ func TestAssignDemand(t *testing.T) {
 	}
 	for i, nodeVolume := range volumes.Nodes {
 		assert.Contains(t, correctVolumes.Nodes, i, "No node in correct volumes data")
-		assert.InDelta(t, nodeVolume, correctVolumes.Nodes[i], eps, "Incorrect volume in node %d", i)
+		assert.InDelta(t, nodeVolume, correctVolumes.Nodes[i], eps, "Incorrect volume in node %s", i)
 	}
 }

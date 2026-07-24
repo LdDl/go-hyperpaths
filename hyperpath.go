@@ -1,5 +1,3 @@
-// Implementation of the Spiess-Florian algorithm for transit assignment. See the ref. at spiess_floarian.tex LaTeX file.
-
 package hyperpaths
 
 import (
@@ -7,24 +5,33 @@ import (
 	"math"
 )
 
-// Strategy is optimal strategy as it defined in Spiess-Florian algorithm
+// Strategy is the optimal strategy as defined in the Spiess-Florian algorithm.
 type Strategy struct {
-	// u_{i} - expected time to destination
-	Labels map[string]float32
-	// f_{i} - combined frequency at node
-	Freqs map[string]float32
-	// \overline{A} - attractive links in hyperpath
+	// u_{i} - expected travel time from node i to destination
+	Labels map[string]float64
+	// f_{i} - combined frequency of attractive links at node i
+	Freqs map[string]float64
+	// \overline{A} - attractive links forming the hyperpath
 	ASet []*Link
 }
 
 const (
-	ALPHA             = float32(1.0)
-	infiniteFrequency = float32(99999999999.0)
+	// When the first attractive link arrives at a node, f_i = 0 and u_i = +Inf,
+	// so f_i * u_i = 0 * Inf = NaN in IEEE 754. The correct mathematical value
+	// is 1: the Spiess-Florian expected travel time is
+	//   u_i = (1 + sum(f_a * (c_a + u_j))) / f_i
+	// so the product f_i * u_i = 1 + sum(...). At initialization the sum is
+	// empty, leaving f_i * u_i = 1. This constant replaces the NaN.
+	alpha = 1.0
+
+	// Frequency used for on-board (riding) links where headway = 0.
+	// Must be finite to avoid Inf * 0 = NaN in the update formula.
+	// 1e15 gives an effective wait of 1e-15 time units - negligible.
+	infiniteFrequency = 1e15
 )
 
 var (
-	Verbose    = false
-	mathINFf32 = float32(math.Inf(+1))
+	Verbose = false
 )
 
 func FindOptimalStrategy(allLinks []*Link, allStops map[string]struct{}, destination string) *Strategy {
@@ -32,8 +39,8 @@ func FindOptimalStrategy(allLinks []*Link, allStops map[string]struct{}, destina
 	if Verbose {
 		fmt.Println("1.1 Initialization \\\\")
 	}
-	u := make(map[string]float32, len(allStops))
-	f := make(map[string]float32, len(allStops))
+	u := make(map[string]float64, len(allStops))
+	f := make(map[string]float64, len(allStops))
 	for stop := range allStops {
 		if Verbose {
 			fmt.Printf("$f_{%s} = 0$ \\\\ \n", stop)
@@ -49,20 +56,16 @@ func FindOptimalStrategy(allLinks []*Link, allStops map[string]struct{}, destina
 		if Verbose {
 			fmt.Printf("$u_{%s} = Infinity$ \\\\ \n", stop)
 		}
-		u[stop] = mathINFf32
+		u[stop] = math.Inf(+1)
 	}
 
-	// Attractive set
-	overlineA := make([]*Link, 0, len(allLinks)/2) // Just prealloc some capacity
+	overlineA := make([]*Link, 0, len(allLinks)/2)
 
-	// Precompute a map of links by ToNode for faster updates
 	linksByToNode := make(map[string][]*Link)
 	for _, link := range allLinks {
 		linksByToNode[link.ToNode] = append(linksByToNode[link.ToNode], link)
 	}
 
-	// Build priority queue (S - active links)
-	// Track entries by FromNode for quick updates
 	entries := make(map[string][]*pqEntry, len(allLinks))
 	pq := make(PriorityQueue, 0, len(allLinks))
 	for _, link := range allLinks {
@@ -74,11 +77,16 @@ func FindOptimalStrategy(allLinks []*Link, allStops map[string]struct{}, destina
 		pq = append(pq, entry)
 	}
 	pq.Init()
-
+	if Verbose {
+		pq.Print()
+	}
 	for pq.Len() > 0 {
 		/* 1.2 Get next link */
+		if Verbose {
+			pq.Print()
+		}
 		entry := pq.Pop().(*pqEntry)
-		if math.IsInf(float64(entry.priority), 1) || entry.priority >= mathINFf32 {
+		if math.IsInf(entry.priority, 1) {
 			break
 		}
 		a := entry.link
@@ -90,18 +98,15 @@ func FindOptimalStrategy(allLinks []*Link, allStops map[string]struct{}, destina
 		if Verbose {
 			fmt.Printf("Process: $a = (i, j) = (%s, %s)$, \\\\ \n", i, j)
 		}
-		// Skip if not improving current label
 		if u[i] < sumUC {
-			// fmt.Printf("\\quad $u_i < u_j + c_a : %v < %v + %v$ - TRUE \\\\ \n", u[i], u[j], a.TravelCost)
 			continue
 		}
 		if Verbose {
 			fmt.Printf("\\quad $u_i < u_j + c_a : %v < %v + %v$ - FALSE \\\\ \n", u[i], u[j], a.TravelCost)
 		}
-		// Calculate frequency (1/headway)
 		freq := infiniteFrequency
 		if a.Headway > 0 {
-			freq = 1 / a.Headway
+			freq = 1.0 / a.Headway
 		}
 		if Verbose {
 			fmt.Printf("\\quad $f_a = %v$ \\\\ \n", freq)
@@ -112,12 +117,12 @@ func FindOptimalStrategy(allLinks []*Link, allStops map[string]struct{}, destina
 			)
 		}
 		numeratorPart := f[i] * u[i]
-		if math.IsNaN(float64(numeratorPart)) {
-			numeratorPart = ALPHA
+		if math.IsNaN(numeratorPart) {
+			numeratorPart = alpha
 		}
 		numeratorPart2 := freq * (u[j] + a.TravelCost)
-		if math.IsNaN(float64(numeratorPart2)) {
-			numeratorPart2 = ALPHA
+		if math.IsNaN(numeratorPart2) {
+			numeratorPart2 = alpha
 		}
 		numerator := numeratorPart + numeratorPart2
 		denominator := f[i] + freq
@@ -129,10 +134,8 @@ func FindOptimalStrategy(allLinks []*Link, allStops map[string]struct{}, destina
 		}
 		f[i] = denominator
 
-		// Update attractive set
 		overlineA = append(overlineA, a)
 
-		// Update priority queue (for u[i]) - OPTIMIZED VERSION
 		if linksToUpdate, exists := linksByToNode[i]; exists {
 			for _, link := range linksToUpdate {
 				if iEntries, hasEntries := entries[link.FromNode]; hasEntries {

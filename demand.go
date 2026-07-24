@@ -5,22 +5,31 @@ import (
 	"sort"
 )
 
-// Volumes is assignment demand according to optimal strategy
+// Volumes holds the assigned demand according to the optimal strategy.
 type Volumes struct {
-	// Volumes for links
-	Links map[string]map[string]float32
-	// Volumes for nodes
-	Nodes map[string]float32
+	// Link volumes: Links[fromNode][toNode] = flow
+	Links map[string]map[string]float64
+	// Node volumes: accumulated flow through each node
+	Nodes map[string]float64
 }
 
-func AssignDemand(allLinks []*Link, allStops map[string]struct{}, optimalStrategy *Strategy, trips map[string]map[string]float32, destination string) *Volumes {
-	// Sort attractive links set by u{j} + c{a} in descending order
-	sort.Slice(optimalStrategy.ASet, func(i, j int) bool {
-		a := optimalStrategy.ASet[i]
-		b := optimalStrategy.ASet[j]
-		return optimalStrategy.Labels[a.ToNode]+a.TravelCost >= optimalStrategy.Labels[b.ToNode]+b.TravelCost
+func AssignDemand(allLinks []*Link, allStops map[string]struct{}, optimalStrategy *Strategy, trips map[string]map[string]float64, destination string) *Volumes {
+	// Work on a copy so the caller's ASet order is preserved.
+	sorted := make([]*Link, len(optimalStrategy.ASet))
+	copy(sorted, optimalStrategy.ASet)
+
+	// Sort attractive links by decreasing (u_j + c_a).
+	// Tie-break by decreasing u[FromNode] so upstream nodes are loaded first.
+	sort.SliceStable(sorted, func(i, j int) bool {
+		ai := optimalStrategy.Labels[sorted[i].ToNode] + sorted[i].TravelCost
+		aj := optimalStrategy.Labels[sorted[j].ToNode] + sorted[j].TravelCost
+		if ai != aj {
+			return ai > aj
+		}
+		return optimalStrategy.Labels[sorted[i].FromNode] > optimalStrategy.Labels[sorted[j].FromNode]
 	})
-	nodeVolumes := make(map[string]float32, len(allStops))
+
+	nodeVolumes := make(map[string]float64, len(allStops))
 	for i := range allStops {
 		nodeVolumes[i] = 0
 	}
@@ -30,21 +39,21 @@ func AssignDemand(allLinks []*Link, allStops map[string]struct{}, optimalStrateg
 			nodeVolumes[destination] += tripsNum
 		}
 	}
+	// Destination absorbs flow: negate so arrivals cancel it to zero.
 	nodeVolumes[destination] *= -1
 
-	v := make(map[string]map[string]float32)
+	v := make(map[string]map[string]float64)
 	for _, a := range allLinks {
 		if _, ok := v[a.FromNode]; !ok {
-			v[a.FromNode] = make(map[string]float32)
+			v[a.FromNode] = make(map[string]float64)
 		}
 		v[a.FromNode][a.ToNode] = 0.0
 	}
 
-	for _, a := range optimalStrategy.ASet {
-		// Calculate frequency (1/headway)
+	for _, a := range sorted {
 		freq := infiniteFrequency
 		if a.Headway > 0 {
-			freq = 1 / a.Headway
+			freq = 1.0 / a.Headway
 		}
 		va := (freq / optimalStrategy.Freqs[a.FromNode]) * nodeVolumes[a.FromNode]
 		if Verbose {

@@ -14,19 +14,19 @@ func main() {
 		"B": {},
 	}
 	allLinks := []*hyperpaths.Link{
-		{"A", "B", "Line 1", 25, 6},
-		{"A", "X2", "Line 2", 7, 6},
-		{"X2", "X", "Line 2", 0, 0},
-		{"X", "X2", "Line 2", 0, 6},
-		{"X2", "Y", "Line 2", 6, 0},
-		{"Y3", "Y", "Line 3", 0, 15},
-		{"Y", "B", "Line 4", 10, 3},
-		{"X", "Y3", "Line 3", 4, 15},
-		{"Y", "Y3", "Line 3", 0, 15},
-		{"Y3", "B", "Line 3", 4, 0},
+		{FromNode: "A", ToNode: "B", RouteID: "Line 1", TravelCost: 25, Headway: 6},
+		{FromNode: "A", ToNode: "X2", RouteID: "Line 2", TravelCost: 7, Headway: 6},
+		{FromNode: "X2", ToNode: "X", RouteID: "Line 2", TravelCost: 0, Headway: 0},
+		{FromNode: "X", ToNode: "X2", RouteID: "Line 2", TravelCost: 0, Headway: 6},
+		{FromNode: "X2", ToNode: "Y", RouteID: "Line 2", TravelCost: 6, Headway: 0},
+		{FromNode: "Y3", ToNode: "Y", RouteID: "Line 3", TravelCost: 0, Headway: 15},
+		{FromNode: "Y", ToNode: "B", RouteID: "Line 4", TravelCost: 10, Headway: 3},
+		{FromNode: "X", ToNode: "Y3", RouteID: "Line 3", TravelCost: 4, Headway: 15},
+		{FromNode: "Y", ToNode: "Y3", RouteID: "Line 3", TravelCost: 0, Headway: 15},
+		{FromNode: "Y3", ToNode: "B", RouteID: "Line 3", TravelCost: 4, Headway: 0},
 	}
 	destinationNode := "B"
-	odMatrix := map[string]map[string]float32{
+	odMatrix := map[string]map[string]float64{
 		"A": {
 			"B": 1,
 		},

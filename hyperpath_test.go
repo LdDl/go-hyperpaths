@@ -1,13 +1,14 @@
 package hyperpaths
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func TestHyperPaths(t *testing.T) {
-	// Test right from the paper
+	Verbose = true
 	allNodes := map[string]struct{}{
 		"A": {},
 		"X": {}, "X2": {},
@@ -28,47 +29,51 @@ func TestHyperPaths(t *testing.T) {
 	}
 	destinationNode := "B"
 	ops := FindOptimalStrategy(allLinks, allNodes, destinationNode)
-	correctOps := Strategy{
-		Labels: map[string]float32{
-			"A":  27.75,
-			"X":  19.071426,
-			"X2": 17.5,
-			"Y":  11.500001,
-			"Y3": 4,
-			"B":  0,
-		},
-		Freqs: map[string]float32{
-			"A":  0.33333334,
-			"X":  0.23333335,
-			"X2": 1e+11,
-			"Y":  0.4,
-			"Y3": 1e+11,
-			"B":  0,
-		},
-		ASet: []*Link{
-			allLinks[9], // y3-b
-			allLinks[8], // y-y3
-			allLinks[7], // x-y3
-			allLinks[6], // y-b
-			allLinks[4], // x2-y
-			allLinks[3], // x-x2
-			allLinks[1], // a-x2
-			allLinks[0], // a-b
-		},
+
+	const eps = 1e-9
+
+	expectedLabels := map[string]float64{
+		"A":  27.75,
+		"X":  19.071428571428573,
+		"X2": 17.5,
+		"Y":  11.5,
+		"Y3": 4,
+		"B":  0,
 	}
-	assert.Equal(t, len(ops.Labels), len(correctOps.Labels), "Incorrect number of labels")
-	assert.Equal(t, len(ops.Freqs), len(correctOps.Freqs), "Incorrect number of frequencies")
-	assert.Equal(t, len(ops.ASet), len(correctOps.ASet), "Incorrect number of links in attractive set")
-	const eps = 1e-20
+	expectedFreqs := map[string]float64{
+		"A":  1.0 / 3.0,
+		"X":  7.0 / 30.0,
+		"X2": infiniteFrequency,
+		"Y":  0.4,
+		"Y3": infiniteFrequency,
+		"B":  0,
+	}
+	// Matches the paper order (Spiess & Florian 1989, p. 93-94)
+	expectedASet := []*Link{
+		allLinks[9], // Y3->B
+		allLinks[8], // Y->Y3
+		allLinks[7], // X->Y3
+		allLinks[6], // Y->B
+		allLinks[4], // X2->Y
+		allLinks[3], // X->X2
+		allLinks[1], // A->X2
+		allLinks[0], // A->B
+	}
+
+	assert.Equal(t, len(ops.Labels), len(expectedLabels), "Incorrect number of labels")
+	assert.Equal(t, len(ops.Freqs), len(expectedFreqs), "Incorrect number of frequencies")
+	assert.Equal(t, len(ops.ASet), len(expectedASet), "Incorrect number of links in attractive set")
+
 	for k, v := range ops.Labels {
-		assert.Contains(t, correctOps.Labels, k, "Incorrect label key %s has met", k)
-		assert.InDelta(t, v, correctOps.Labels[k], eps, "Incorrect label value for node %s", k)
+		assert.Contains(t, expectedLabels, k, "Incorrect label key %s has met", k)
+		assert.InDelta(t, v, expectedLabels[k], eps, "Incorrect label value for node %s", k)
 	}
 	for k, v := range ops.Freqs {
-		assert.Contains(t, correctOps.Freqs, k, "Incorrect frequency key %s has met", k)
-		assert.InDelta(t, v, correctOps.Freqs[k], eps, "Incorrect frequency value for node %s", k)
+		assert.Contains(t, expectedFreqs, k, "Incorrect frequency key %s has met", k)
+		assert.InDelta(t, v, expectedFreqs[k], eps, "Incorrect frequency value for node %s", k)
 	}
 	for i, v := range ops.ASet {
-		assert.Equal(t, v, correctOps.ASet[i], "Incorrect link in attractive set at index %d", i)
+		fmt.Println(v, expectedASet[i])
+		assert.Equal(t, v, expectedASet[i], "Incorrect link in attractive set at index %d", i)
 	}
 }

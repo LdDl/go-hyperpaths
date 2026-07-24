@@ -26,7 +26,7 @@ func main() {
 		{"Y3", "B", "Line 3", 4, 0},
 	}
 	destinationNode := "B"
-	odMatrix := map[string]map[string]float32{
+	odMatrix := map[string]map[string]float64{
 		"A": {
 			"B": 1,
 		},

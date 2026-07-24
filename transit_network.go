@@ -1,6 +1,6 @@
 package hyperpaths
 
-// Link is just an edge in graph
+// Link is an edge in the transit network graph.
 type Link struct {
 	// Source node of the link
 	FromNode string
@@ -8,9 +8,9 @@ type Link struct {
 	ToNode string
 	// Corresponding route
 	RouteID string
-	// In most cases this should trave time along the link
-	TravelCost float32
-	// Interval of public transport
-	// Headway could have only dwell (on-board) links
-	Headway float32
+	// Travel time along the link (in minutes or any consistent unit)
+	TravelCost float64
+	// Service headway. Boarding links have headway > 0 (frequency = 1/headway).
+	// On-board (riding) links have headway = 0 (no waiting).
+	Headway float64
 }

@@ -67,27 +67,29 @@ Optimal strategy:
         Node labels:
                 u_{i} = B: 0.000000
                 u_{i} = A: 27.750000
-                u_{i} = X: 19.071426
+                u_{i} = X: 19.071429
                 u_{i} = X2: 17.500000
-                u_{i} = Y: 11.500001
+                u_{i} = Y: 11.500000
                 u_{i} = Y3: 4.000000
         Nodes probablities:
-                f_{i} = Y3: 99999997952.000000
-                f_{i} = B: 0.000000
                 f_{i} = A: 0.333333
                 f_{i} = X: 0.233333
-                f_{i} = X2: 99999997952.000000
+                f_{i} = X2: +Inf
                 f_{i} = Y: 0.400000
+                f_{i} = Y3: +Inf
+                f_{i} = B: 0.000000
         Attractive links set:
-                 a = (i, j) = (A, B)
-                 a = (i, j) = (A, X2)
+                 a = (i, j) = (Y3, B)
+                 a = (i, j) = (Y, Y3)
+                 a = (i, j) = (X, Y3)
+                 a = (i, j) = (Y, B)
                  a = (i, j) = (X2, Y)
                  a = (i, j) = (X, X2)
-                 a = (i, j) = (Y, B)
-                 a = (i, j) = (X, Y3)
-                 a = (i, j) = (Y, Y3)
-                 a = (i, j) = (Y3, B)
+                 a = (i, j) = (A, X2)
+                 a = (i, j) = (A, B)
 ```
+
+Labels match the paper exactly (no big-M artifacts): nodes served by a no-wait link report $f_i = +\inf$, and the attractive set is listed in acceptance order, i.e. non-decreasing $u_j + c_a$ - the same order the paper builds it in (p. 97).
 
 * Assiging demand
 Considering only one trip from node `A` to destination node `B`, we should got:

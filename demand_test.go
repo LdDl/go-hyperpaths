@@ -1,6 +1,7 @@
 package hyperpaths
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -43,9 +44,9 @@ func TestAssignDemand(t *testing.T) {
 		Freqs: map[string]float64{
 			"A":  1.0 / 3.0,
 			"X":  7.0 / 30.0,
-			"X2": infiniteFrequency,
+			"X2": math.Inf(+1),
 			"Y":  0.4,
-			"Y3": infiniteFrequency,
+			"Y3": math.Inf(+1),
 			"B":  0,
 		},
 		ASet: []*Link{

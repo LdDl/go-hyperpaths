@@ -9,25 +9,19 @@ import (
 type Strategy struct {
 	// u_{i} - expected travel time from node i to destination
 	Labels map[string]float64
-	// f_{i} - combined frequency of attractive links at node i
+	// f_{i} - combined frequency of attractive links at node i.
+	// +Inf marks a node whose basket is a single no-wait link.
 	Freqs map[string]float64
 	// \overline{A} - attractive links forming the hyperpath
 	ASet []*Link
 }
 
 const (
-	// When the first attractive link arrives at a node, f_i = 0 and u_i = +Inf,
-	// so f_i * u_i = 0 * Inf = NaN in IEEE 754. The correct mathematical value
-	// is 1: the Spiess-Florian expected travel time is
+	// The waiting-time constant of the Spiess-Florian expected travel time:
 	//   u_i = (1 + sum(f_a * (c_a + u_j))) / f_i
-	// so the product f_i * u_i = 1 + sum(...). At initialization the sum is
-	// empty, leaving f_i * u_i = 1. This constant replaces the NaN.
+	// When the first attractive link arrives at a node the sum is empty and
+	// the numerator starts from this constant.
 	alpha = 1.0
-
-	// Frequency used for on-board (riding) links where headway = 0.
-	// Must be finite to avoid Inf * 0 = NaN in the update formula.
-	// 1e15 gives an effective wait of 1e-15 time units - negligible.
-	infiniteFrequency = 1e15
 )
 
 var (
@@ -60,6 +54,10 @@ func FindOptimalStrategy(allLinks []*Link, allStops map[string]struct{}, destina
 	}
 
 	overlineA := make([]*Link, 0, len(allLinks)/2)
+	// Positions of each node's basket links inside overlineA, so that a
+	// no-wait link can replace the whole basket. Replaced entries are set
+	// to nil and compacted at the end.
+	aSetIdx := make(map[string][]int)
 
 	linksByToNode := make(map[string][]*Link)
 	for _, link := range allLinks {
@@ -98,43 +96,56 @@ func FindOptimalStrategy(allLinks []*Link, allStops map[string]struct{}, destina
 		if Verbose {
 			fmt.Printf("Process: $a = (i, j) = (%s, %s)$, \\\\ \n", i, j)
 		}
+		// A node already served by a no-wait link is final: the no-wait
+		// link absorbs all flow (its share f_a/f_i is 1 in the limit),
+		// so no other link may enter the basket
+		if math.IsInf(f[i], 1) {
+			continue
+		}
 		if u[i] < sumUC {
 			continue
 		}
 		if Verbose {
 			fmt.Printf("\\quad $u_i < u_j + c_a : %v < %v + %v$ - FALSE \\\\ \n", u[i], u[j], a.TravelCost)
 		}
-		freq := infiniteFrequency
-		if a.Headway > 0 {
-			freq = 1.0 / a.Headway
+		if a.Headway <= 0 {
+			// No-wait link (infinite frequency): the modified step 1.3
+			// given by the paper on p. 96 - the exact limit of the label
+			// update formula as f_a -> inf. The link replaces the whole
+			// attractive basket:
+			//   u_i := u_j + c_a, f_i := inf, A_i := {a}
+			u[i] = sumUC
+			f[i] = math.Inf(+1)
+			for _, idx := range aSetIdx[i] {
+				overlineA[idx] = nil
+			}
+			aSetIdx[i] = aSetIdx[i][:0]
+			overlineA = append(overlineA, a)
+			aSetIdx[i] = append(aSetIdx[i], len(overlineA)-1)
+			if Verbose {
+				fmt.Printf("\\quad no-wait link: $u_i = u_j + c_a = %v$, $f_i = \\infty$, basket replaced by $(%s, %s)$ \\\\ \n", u[i], i, j)
+			}
+		} else {
+			freq := 1.0 / a.Headway
+			if Verbose {
+				fmt.Printf("\\quad $f_a = %v$ \\\\ \n", freq)
+				fmt.Printf("\\quad $u_j + c_a = %v$ \\\\ \n", sumUC)
+				fmt.Printf("\\quad $u_i = %v$ \\\\ \n", u[i])
+			}
+			if f[i] == 0 {
+				// First link in the basket: u_i = (1 + f_a*(u_j+c_a)) / f_a
+				u[i] = (alpha + freq*sumUC) / freq
+			} else {
+				u[i] = (f[i]*u[i] + freq*sumUC) / (f[i] + freq)
+			}
+			f[i] += freq
+			overlineA = append(overlineA, a)
+			aSetIdx[i] = append(aSetIdx[i], len(overlineA)-1)
+			if Verbose {
+				fmt.Printf("\\quad$u_i = \\frac{f_i * u_i + f_a * (u_j + c_a)}{f_i + f_a} = %v$, $f_i = %v$ \\\\ \n", u[i], f[i])
+				fmt.Printf("\\quad $\\overline{A} = \\overline{A} \\cup {(%s, %s)}$ \\\\ \n", i, j)
+			}
 		}
-		if Verbose {
-			fmt.Printf("\\quad $f_a = %v$ \\\\ \n", freq)
-			fmt.Printf("\\quad $u_j + c_a = %v$ \\\\ \n", u[j]+a.TravelCost)
-			fmt.Printf("\\quad $u_i = %v$ \\\\ \n", u[i])
-			fmt.Printf("\\quad$u_i = \\frac{f_i * u_i + f_a * (u_j + c_a)}{f_i + f_a} = \\frac{(%v) * (%v) + (%v) * ((%v) + (%v))}{(%v) + (%v)} = $ \\\\ \n",
-				f[i], u[i], freq, u[j], a.TravelCost, f[i], freq,
-			)
-		}
-		numeratorPart := f[i] * u[i]
-		if math.IsNaN(numeratorPart) {
-			numeratorPart = alpha
-		}
-		numeratorPart2 := freq * (u[j] + a.TravelCost)
-		if math.IsNaN(numeratorPart2) {
-			numeratorPart2 = alpha
-		}
-		numerator := numeratorPart + numeratorPart2
-		denominator := f[i] + freq
-		u[i] = numerator / denominator
-		if Verbose {
-			fmt.Printf("\\quad \\quad $\\frac{(%v) + (%v)}{(%v) + (%v)} = \\frac{%v}{%v} = %v$ \\\\ \n", numeratorPart, numeratorPart2, f[i], freq, numerator, denominator, u[i])
-			fmt.Printf("\\quad $f_i = f_{i} + f_a = (%v) + (%v) = %v$ \\\\ \n", f[i], freq, denominator)
-			fmt.Printf("\\quad $\\overline{A} = \\overline{A} \\cup {a} = \\overline{A} \\cup {(%s, %s)}$ \\\\ \n", i, j)
-		}
-		f[i] = denominator
-
-		overlineA = append(overlineA, a)
 
 		if linksToUpdate, exists := linksByToNode[i]; exists {
 			for _, link := range linksToUpdate {
@@ -155,10 +166,20 @@ func FindOptimalStrategy(allLinks []*Link, allStops map[string]struct{}, destina
 			}
 		}
 	}
+
+	// Compact the attractive set: drop entries replaced by no-wait links.
+	// The append order is preserved, i.e. non-decreasing u_j + c_a.
+	aSet := make([]*Link, 0, len(overlineA))
+	for _, link := range overlineA {
+		if link != nil {
+			aSet = append(aSet, link)
+		}
+	}
+
 	strategy := &Strategy{
 		Labels: u,
 		Freqs:  f,
-		ASet:   overlineA,
+		ASet:   aSet,
 	}
 	return strategy
 }

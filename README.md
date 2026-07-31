@@ -32,6 +32,11 @@ Here is copy of algorithm in MathJax (for the LaTeX see [spiess_floarian.tex](./
      * Calculate volume: $$v_a = \frac{f_a}{f_i}V_i$$
      * Update node volume: $$V_j = V_j + v_a$$
 
+### Infinite frequencies (no-wait links)
+
+Links with `Headway = 0` (walking, alighting, on-board) have infinite frequency. Instead of a big-M constant, the implementation follows the modified version of the algorithm given by the paper itself (p. 96): such a link replaces the whole attractive set of its tail node, $u_i := u_j + c_a$, $f_i := \infty$, $\overlin {A}_i := \{a\}$, and during loading it takes the entire node volume ($v_a := V_i$). The paper's own worked example uses this modified version, so the labels match it exactly (e.g. $u_{Y3} = 4$, not $4 + \varepsilon$).
+
+The loading phase needs no sorting, as the paper notes on p. 97: "no additional computations are needed to establish the order in which the links are processed, since it is the inverse of the order used in part 1 of the algorithm". The attractive set is built in acceptance order (non-decreasing $u_j + c_a$), so reverse iteration is exactly the required decreasing order (Table 3 of the paper), and at zero-cost ties it loads a node's inflow links before its outflow links by construction.
 
 ## How to use
 

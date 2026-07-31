@@ -2,7 +2,7 @@ package hyperpaths
 
 import (
 	"fmt"
-	"sort"
+	"math"
 )
 
 // Volumes holds the assigned demand according to the optimal strategy.
@@ -14,20 +14,16 @@ type Volumes struct {
 }
 
 func AssignDemand(allLinks []*Link, allStops map[string]struct{}, optimalStrategy *Strategy, trips map[string]map[string]float64, destination string) *Volumes {
-	// Work on a copy so the caller's ASet order is preserved.
-	sorted := make([]*Link, len(optimalStrategy.ASet))
-	copy(sorted, optimalStrategy.ASet)
-
-	// Sort attractive links by decreasing (u_j + c_a).
-	// Tie-break by decreasing u[FromNode] so upstream nodes are loaded first.
-	sort.SliceStable(sorted, func(i, j int) bool {
-		ai := optimalStrategy.Labels[sorted[i].ToNode] + sorted[i].TravelCost
-		aj := optimalStrategy.Labels[sorted[j].ToNode] + sorted[j].TravelCost
-		if ai != aj {
-			return ai > aj
-		}
-		return optimalStrategy.Labels[sorted[i].FromNode] > optimalStrategy.Labels[sorted[j].FromNode]
-	})
+	// The attractive set is built in acceptance order, which is
+	// non-decreasing u_j + c_a (heap pops), so its reverse is exactly the
+	// paper's decreasing loading order - no sorting needed, as the paper
+	// notes on p. 97: the processing order of step 2.2 "is the inverse of
+	// the order used in part 1 of the algorithm". At zero-cost ties
+	// (no-wait chains produce exactly equal keys) reverse acceptance
+	// order also guarantees that a node's inflow links are loaded before
+	// its outflow links: a link (i, j) is accepted before the links into i
+	// are updated and popped.
+	sorted := optimalStrategy.ASet
 
 	nodeVolumes := make(map[string]float64, len(allStops))
 	for i := range allStops {
@@ -50,16 +46,23 @@ func AssignDemand(allLinks []*Link, allStops map[string]struct{}, optimalStrateg
 		v[a.FromNode][a.ToNode] = 0.0
 	}
 
-	for _, a := range sorted {
-		freq := infiniteFrequency
-		if a.Headway > 0 {
-			freq = 1.0 / a.Headway
+	for k := len(sorted) - 1; k >= 0; k-- {
+		a := sorted[k]
+		fi := optimalStrategy.Freqs[a.FromNode]
+		var va float64
+		if math.IsInf(fi, 1) {
+			// A no-wait basket holds exactly one link (the one that replaced
+			// it); per the paper's modified step 2.2 (p. 96) the link takes
+			// the whole node volume: v_a := V_i
+			va = nodeVolumes[a.FromNode]
+		} else {
+			// A finite basket holds only boarding links (headway > 0)
+			freq := 1.0 / a.Headway
+			va = (freq / fi) * nodeVolumes[a.FromNode]
 		}
-		va := (freq / optimalStrategy.Freqs[a.FromNode]) * nodeVolumes[a.FromNode]
 		if Verbose {
 			fmt.Printf("Assigning demand for link: (%s, %s) \\\\ \n", a.FromNode, a.ToNode)
-			fmt.Printf("\\quad $v_{(%s, %s)} = \\frac{%v}{%v}%v = %v$ \\\\ \n", a.FromNode, a.ToNode, freq, optimalStrategy.Freqs[a.FromNode], nodeVolumes[a.FromNode], va)
-			fmt.Printf("\\quad $V_{%s} = V_{%s} + v_{(%s, %s) = %v + %v = %v}$ \\\\ \n", a.ToNode, a.ToNode, a.FromNode, a.ToNode, nodeVolumes[a.ToNode], va, nodeVolumes[a.ToNode]+va)
+			fmt.Printf("\\quad $v_{(%s, %s)} = %v$, $V_{%s} = %v + %v$ \\\\ \n", a.FromNode, a.ToNode, va, a.ToNode, nodeVolumes[a.ToNode], va)
 		}
 		v[a.FromNode][a.ToNode] = va
 		nodeVolumes[a.ToNode] += va

@@ -14,13 +14,20 @@ Here is copy of algorithm in MathJax (for the LaTeX see [spiess_floarian.tex](./
    - Set $f_i = 0$ for all nodes
    - Initialize empty attractive set $\overline{A}$
 
-2. **Label Setting**
-   - For each link $a = (i,j)$ with minimum $u_j + c_a$
+2. **Label Setting** (repeated until the link set is exhausted)
+   - Take the unexamined link $a = (i,j)$ with minimum $u_j + c_a$
    - If $u_i \geq u_j + c_a$:
      * Update node label: $$u_i = \frac{f_i \cdot u_i + f_a \cdot (u_j + c_a)}{f_i + f_a}$$
      * Update frequency: $$f_i = f_i + f_a$$
      * Add to attractive set: $$\overline{A} = \overline{A} \cup \{a\}$$
-    
+
+   Note: the implementation accepts a link only on strict improvement,
+   $u_i > u_j + c_a$. At exact equality the update above is a no-op, so
+   labels and costs are identical, but accepting such links can close
+   zero-cost board-alight cycles on which the one-pass loading of part 2
+   loses flow. See the remark in [spiess_floarian.tex](./spiess_floarian.tex)
+   and `TestBoardAlightLoopConservation`.
+
 ### Part 2: Assign demand according to optimal strategy
 
 1. **Initialization**
@@ -34,7 +41,7 @@ Here is copy of algorithm in MathJax (for the LaTeX see [spiess_floarian.tex](./
 
 ### Infinite frequencies (no-wait links)
 
-Links with `Headway = 0` (walking, alighting, on-board) have infinite frequency. Instead of a big-M constant, the implementation follows the modified version of the algorithm given by the paper itself (p. 96): such a link replaces the whole attractive set of its tail node, $u_i := u_j + c_a$, $f_i := \infty$, $\overlin {A}_i := \{a\}$, and during loading it takes the entire node volume ($v_a := V_i$). The paper's own worked example uses this modified version, so the labels match it exactly (e.g. $u_{Y3} = 4$, not $4 + \varepsilon$).
+Links with `Headway = 0` (walking, alighting, on-board) have infinite frequency. Instead of a big-M constant, the implementation follows the modified version of the algorithm given by the paper itself (p. 96): such a link replaces the whole attractive set of its tail node, $u_i := u_j + c_a$, $f_i := \infty$, $\overline{A}_i := \{a\}$, and during loading it takes the entire node volume ($v_a := V_i$). The paper's own worked example uses this modified version, so the labels match it exactly (e.g. $u_{Y3} = 4$, not $4 + \varepsilon$).
 
 The loading phase needs no sorting, as the paper notes on p. 97: "no additional computations are needed to establish the order in which the links are processed, since it is the inverse of the order used in part 1 of the algorithm". The attractive set is built in acceptance order (non-decreasing $u_j + c_a$), so reverse iteration is exactly the required decreasing order (Table 3 of the paper), and at zero-cost ties it loads a node's inflow links before its outflow links by construction.
 
@@ -63,19 +70,19 @@ The loading phase needs no sorting, as the paper notes on p. 97: "no additional 
          "B": {},
       }
       allLinks := []*hyperpaths.Link{
-         {"A", "B", "Line 1", 25, 6},
-         {"A", "X2", "Line 2", 7, 6},
-         {"X2", "X", "Line 2", 0, 0},
-         {"X", "X2", "Line 2", 0, 6},
-         {"X2", "Y", "Line 2", 6, 0},
-         {"Y3", "Y", "Line 3", 0, 15},
-         {"Y", "B", "Line 4", 10, 3},
-         {"X", "Y3", "Line 3", 4, 15},
-         {"Y", "Y3", "Line 3", 0, 15},
-         {"Y3", "B", "Line 3", 4, 0},
+         {FromNode: "A", ToNode: "B", RouteID: "Line 1", TravelCost: 25, Headway: 6},
+         {FromNode: "A", ToNode: "X2", RouteID: "Line 2", TravelCost: 7, Headway: 6},
+         {FromNode: "X2", ToNode: "X", RouteID: "Line 2", TravelCost: 0, Headway: 0},
+         {FromNode: "X", ToNode: "X2", RouteID: "Line 2", TravelCost: 0, Headway: 6},
+         {FromNode: "X2", ToNode: "Y", RouteID: "Line 2", TravelCost: 6, Headway: 0},
+         {FromNode: "Y3", ToNode: "Y", RouteID: "Line 3", TravelCost: 0, Headway: 15},
+         {FromNode: "Y", ToNode: "B", RouteID: "Line 4", TravelCost: 10, Headway: 3},
+         {FromNode: "X", ToNode: "Y3", RouteID: "Line 3", TravelCost: 4, Headway: 15},
+         {FromNode: "Y", ToNode: "Y3", RouteID: "Line 3", TravelCost: 0, Headway: 15},
+         {FromNode: "Y3", ToNode: "B", RouteID: "Line 3", TravelCost: 4, Headway: 0},
       }
       destinationNode := "B"
-      odMatrix := map[string]map[string]float32{
+      odMatrix := map[string]map[string]float64{
          "A": {
             "B": 1,
          },

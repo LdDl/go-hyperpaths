@@ -124,6 +124,43 @@ func TestZeroCostChainLoading(t *testing.T) {
 	assert.InDelta(t, volumes.Links["S2"]["S3"], 100.0, 1e-12)
 }
 
+func TestBoardAlightLoopConservation(t *testing.T) {
+	// Regression for the strict acceptance test in step 1.3. Line F is
+	// useless onward from S2 (it rides only to the dead end S3), so its
+	// route node F2 gets its label through the alighting link:
+	// u_F2 = u_S2 + 0. The boarding link S2 -> F2 then has key exactly
+	// u_S2; the paper's nonstrict test (u_i >= u_j + c_a) would accept
+	// it, close the zero-cost cycle S2 -> F2 -> S2 and strand part of
+	// the volume in phase 2. Strict acceptance must keep line F out and
+	// deliver all 100 trips through line R.
+	allNodes := map[string]struct{}{
+		"S1": {}, "S2": {}, "S3": {}, "R2": {}, "F2": {},
+	}
+	allLinks := []*Link{
+		// line R: boarding at S2, riding to the destination S1
+		{"S2", "R2", "R", 0, 6},
+		{"R2", "S1", "R", 5, 0},
+		// line F: boarding at S2, riding only to the dead end S3
+		{"S2", "F2", "F", 0, 6},
+		{"F2", "S3", "F", 5, 0},
+		// alighting back at S2, sets u_F2 = u_S2
+		{"F2", "S2", "F", 0, 0},
+	}
+	ops := FindOptimalStrategy(allLinks, allNodes, "S1")
+	// 6 wait + 5 ride
+	assert.InDelta(t, ops.Labels["S2"], 11.0, 1e-12)
+
+	trips := map[string]map[string]float64{
+		"S2": {"S1": 100},
+	}
+	volumes := AssignDemand(allLinks, allNodes, ops, trips, "S1")
+	assert.InDelta(t, volumes.Links["S2"]["R2"], 100.0, 1e-12)
+	assert.InDelta(t, volumes.Links["R2"]["S1"], 100.0, 1e-12)
+	// the useless line carries nothing
+	assert.InDelta(t, volumes.Links["S2"]["F2"], 0.0, 1e-12)
+	assert.InDelta(t, volumes.Links["F2"]["S2"], 0.0, 1e-12)
+}
+
 func TestNoWaitReplacesBasket(t *testing.T) {
 	// A boarding link enters the basket of I first (key 4), then a
 	// cheaper no-wait chain I->W->D (key 5 < current u_I = 10) must

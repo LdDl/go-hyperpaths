@@ -102,11 +102,37 @@ func FindOptimalStrategy(allLinks []*Link, allStops map[string]struct{}, destina
 		if math.IsInf(f[i], 1) {
 			continue
 		}
-		if u[i] < sumUC {
+		// Strict improvement test: a link is accepted only if it
+		// strictly improves the label. Step 1.3 of Spiess & Florian
+		// (1989) prints the nonstrict u_i >= u_j + c_a, but the two
+		// rules differ only at exact equality, where the update is a
+		// no-op (the combination formula returns u_i unchanged; for
+		// f_a = inf the basket is replaced at the same value): labels,
+		// expected travel times and every number published in the
+		// paper are identical either way. The strict form is what
+		// part 2 needs. Step 2.2 loads links "in reverse topological
+		// order (decreasing u_j + c_a)" (p. 94) and Proposition 4
+		// claims flow conservation "by construction" - both presume an
+		// acyclic strategy, which the nonstrict rule does not
+		// guarantee: in an expanded route graph a boarding link (cost
+		// 0) into a route node whose label came from its own alighting
+		// link (cost 0) has key exactly u_i, so >= admits a zero-cost
+		// stop -> node -> stop cycle and the one-pass loading strands
+		// the volume entering it (see
+		// TestBoardAlightLoopConservation). Rejecting at equality
+		// keeps the strategy acyclic and stays optimal: for the
+		// rejected link mu_a = 0 satisfies dual feasibility (20) as an
+		// equality and complementary slackness (24) holds since
+		// v_a = 0, a degenerate optimum. The prose of p. 94 ("if this
+		// time is smaller than u_i, link a is included") describes
+		// exactly this strict rule. All step, equation and page
+		// references above are to the original paper, not to the
+		// spiess_floarian.tex excerpt in this repository.
+		if u[i] <= sumUC {
 			continue
 		}
 		if Verbose {
-			fmt.Printf("\\quad $u_i < u_j + c_a : %v < %v + %v$ - FALSE \\\\ \n", u[i], u[j], a.TravelCost)
+			fmt.Printf("\\quad $u_i \\leq u_j + c_a : %v \\leq %v + %v$ - FALSE \\\\ \n", u[i], u[j], a.TravelCost)
 		}
 		if a.Headway <= 0 {
 			// No-wait link (infinite frequency): the modified step 1.3

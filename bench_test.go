@@ -108,3 +108,144 @@ func BenchmarkComputeSF(b *testing.B) {
 		})
 	}
 }
+
+func gridStops(rows, cols int) []string {
+	stops := make([]string, 0, rows*cols)
+	for r := 0; r < rows; r++ {
+		for c := 0; c < cols; c++ {
+			stops = append(stops, fmt.Sprintf("s_%d_%d", r, c))
+		}
+	}
+	return stops
+}
+
+var multiSizes = []struct {
+	name       string
+	rows, cols int
+}{
+	{"8x8", 8, 8},
+	{"12x12", 12, 12},
+}
+
+// Full assignment to every stop as a destination, the current way: ComputeSF
+// per destination, which re-interns the network and rebuilds the graph every
+// time.
+func BenchmarkMultiDestComputeSF(b *testing.B) {
+	for _, sz := range multiSizes {
+		links, nodes, _, _ := genGridNetwork(sz.rows, sz.cols, 6.0, 3.0)
+		stops := gridStops(sz.rows, sz.cols)
+		b.Run(sz.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				for _, dest := range stops {
+					od := make(map[string]map[string]float64, len(stops))
+					for _, o := range stops {
+						if o != dest {
+							od[o] = map[string]float64{dest: 1.0}
+						}
+					}
+					_ = ComputeSF(links, nodes, dest, od)
+				}
+			}
+		})
+	}
+}
+
+// Same assignment via the arena Graph/Workspace: the Graph is interned once
+// per full assignment and one Workspace is reused across destinations.
+func BenchmarkMultiDestSolver(b *testing.B) {
+	for _, sz := range multiSizes {
+		links, nodes, _, _ := genGridNetwork(sz.rows, sz.cols, 6.0, 3.0)
+		stops := gridStops(sz.rows, sz.cols)
+		b.Run(sz.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				g := NewGraph(links, nodes)
+				w := g.NewWorkspace()
+				demand := make([]float64, g.NumNodes())
+				stopIDs := make([]int, len(stops))
+				for k, s := range stops {
+					stopIDs[k] = g.NodeIndex(s)
+				}
+				for _, destID := range stopIDs {
+					for k := range demand {
+						demand[k] = 0
+					}
+					for _, oid := range stopIDs {
+						if oid != destID {
+							demand[oid] = 1.0
+						}
+					}
+					_ = w.Assign(destID, demand)
+				}
+			}
+		})
+	}
+}
+
+// The server case: a static network, so the Graph is interned once for all
+// requests; only the Workspace and the per-destination Assign are per request.
+func BenchmarkMultiDestSolverCachedGraph(b *testing.B) {
+	for _, sz := range multiSizes {
+		links, nodes, _, _ := genGridNetwork(sz.rows, sz.cols, 6.0, 3.0)
+		stops := gridStops(sz.rows, sz.cols)
+		g := NewGraph(links, nodes)
+		stopIDs := make([]int, len(stops))
+		for k, s := range stops {
+			stopIDs[k] = g.NodeIndex(s)
+		}
+		b.Run(sz.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				w := g.NewWorkspace()
+				demand := make([]float64, g.NumNodes())
+				for _, destID := range stopIDs {
+					for k := range demand {
+						demand[k] = 0
+					}
+					for _, oid := range stopIDs {
+						if oid != destID {
+							demand[oid] = 1.0
+						}
+					}
+					_ = w.Assign(destID, demand)
+				}
+			}
+		})
+	}
+}
+
+func gridFullOD(stops []string) map[string]map[string]float64 {
+	od := make(map[string]map[string]float64, len(stops))
+	for _, o := range stops {
+		row := make(map[string]float64, len(stops)-1)
+		for _, d := range stops {
+			if d != o {
+				row[d] = 1.0
+			}
+		}
+		od[o] = row
+	}
+	return od
+}
+
+// The ergonomic server case: static Graph cached, a full OD matrix handed to
+// SolveEach, which transposes it once and reuses the Workspace. Should match
+// the hand-written MultiDestSolverCachedGraph loop.
+func BenchmarkMultiDestSolveEach(b *testing.B) {
+	for _, sz := range multiSizes {
+		links, nodes, _, _ := genGridNetwork(sz.rows, sz.cols, 6.0, 3.0)
+		stops := gridStops(sz.rows, sz.cols)
+		od := gridFullOD(stops)
+		g := NewGraph(links, nodes)
+		// Static network + pooled/reused Workspace: the steady-state server
+		// case, where the transpose buffers are already warm.
+		w := g.NewWorkspace()
+		b.Run(sz.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				w.SolveEach(od, func(res *DestResult) { _ = res })
+			}
+		})
+	}
+}

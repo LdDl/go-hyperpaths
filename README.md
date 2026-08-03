@@ -115,5 +115,54 @@ The loading phase needs no sorting, as the paper notes on p. 97: "no additional 
    }
    ```
 
+## Two ways to use it
+
+Both APIs run the same algorithm and give identical results; pick by use case.
+
+### Simple (string) API - for debugging and single solves
+
+`ComputeSF` / `FindOptimalStrategy` / `AssignDemand` (shown above) take string node names and a `map[origin]map[dest]float64` OD, and return human-readable maps. It is the easiest to read, and it is the debugging path: set `hyperpaths.Verbose = true` to print a step-by-step trace of both phases. Internally it already uses the integer arena, so a single solve is fast.
+
+Use it for: one-off / single-destination solves, small networks, debugging, first integration.
+
+### Arena API - for many destinations and long-running / multi-request services
+
+Intern the network once into a `Graph`, then reuse a `Workspace` across destinations. Results are integer-indexed (arena) and, once the workspace is warm, allocation-free. On a full assignment (every stop a destination) this is about an order of magnitude faster than calling `ComputeSF` per destination.
+
+```go
+// once; immutable, shareable
+g := hyperpaths.NewGraph(allLinks, allNodes)
+// reusable buffers
+w := g.NewWorkspace()
+
+// od is map[origin]map[dest]float64
+w.SolveEach(od, func(res *hyperpaths.DestResult) {
+    // res.Labels[i], res.LinkVol[k], res.NodeVol[i] are arena-indexed;
+    // use g.NodeName(i) / g.NodeIndex(name) to translate to/from names.
+    // res is reused on the next destination - copy out what you keep.
+})
+```
+
+For a single destination with an integer demand column there is also the lower-level `w.Assign(destID, demand)`.
+
+Use it for: assigning many destinations, large networks, long-running or multi-user services.
+
+### Concurrency
+
+A `Graph` is immutable and safe to share across goroutines; a `Workspace` is mutable and must not be shared. Build the graph once at startup and pool the workspaces, one per in-flight request:
+
+```go
+graph := hyperpaths.NewGraph(links, stops)
+pool := sync.Pool{New: func() any { return graph.NewWorkspace() }}
+// per request (own goroutine):
+w := pool.Get().(*hyperpaths.Workspace)
+defer pool.Put(w)
+w.SolveEach(od, func(res *hyperpaths.DestResult) {
+   // accumulate res.LinkVol
+})
+```
+
+Do not mutate a shared network, and do not toggle `Verbose`, while assignments are running.
+
 ## References
 Spiess, H. and Florian, M. (1989) "Optimal strategies: A new assignment model for transit networks". Transportation Research Part B: Methodological, 23(2), 83-102. Available in: https://doi.org/10.1016/0191-2615(89)90034-9

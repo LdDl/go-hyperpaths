@@ -6,7 +6,9 @@ import (
 )
 
 type pqEntry struct {
-	link     *Link
+	// Index into the solver's link arrays (integer arena), not a pointer,
+	// so priority updates and comparisons avoid string/pointer chasing.
+	link     int
 	priority float64
 	index    int
 }
@@ -108,7 +110,7 @@ func (pq PriorityQueue) Print() {
 	}
 	arr := make([]string, pq.Len())
 	for i, entry := range pq {
-		arr[i] = "(" + entry.link.FromNode + "," + entry.link.ToNode + ") == " + fmt.Sprintf("%.2f", entry.priority)
+		arr[i] = fmt.Sprintf("link#%d == %.2f", entry.link, entry.priority)
 	}
 	fmt.Printf("Priority Queue: [%s]\\\\ \n", strings.Join(arr, ", "))
 }

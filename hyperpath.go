@@ -33,46 +33,90 @@ func FindOptimalStrategy(allLinks []*Link, allStops map[string]struct{}, destina
 	if Verbose {
 		fmt.Println("1.1 Initialization \\\\")
 	}
-	u := make(map[string]float64, len(allStops))
-	f := make(map[string]float64, len(allStops))
+
+	// Integer arena: map every node name to a dense int index once, so the
+	// hot loops below index slices instead of hashing strings on every
+	// access. allStops is interned first (indices [0, nStops)) so the
+	// returned Labels/Freqs keep exactly the allStops key set; any link
+	// endpoint outside allStops (out of contract) is appended after and left
+	// out of the result.
+	nID := make(map[string]int, len(allStops))
+	nName := make([]string, 0, len(allStops))
+	intern := func(s string) int {
+		if id, ok := nID[s]; ok {
+			return id
+		}
+		id := len(nName)
+		nID[s] = id
+		nName = append(nName, s)
+		return id
+	}
 	for stop := range allStops {
-		if Verbose {
-			fmt.Printf("$f_{%s} = 0$ \\\\ \n", stop)
+		intern(stop)
+	}
+	nStops := len(nName)
+
+	m := len(allLinks)
+	lFrom := make([]int, m)
+	lTo := make([]int, m)
+	lCost := make([]float64, m)
+	lHead := make([]float64, m)
+	for k, link := range allLinks {
+		lFrom[k] = intern(link.FromNode)
+		lTo[k] = intern(link.ToNode)
+		lCost[k] = link.TravelCost
+		lHead[k] = link.Headway
+	}
+	destID := intern(destination)
+	n := len(nName)
+
+	// u_i and f_i as dense slices instead of map[string]float64.
+	u := make([]float64, n)
+	f := make([]float64, n)
+	for id := 0; id < n; id++ {
+		f[id] = 0.0
+		if id == destID {
+			u[id] = 0.0
+		} else {
+			u[id] = math.Inf(+1)
 		}
-		f[stop] = 0.0
-		if stop == destination {
-			if Verbose {
-				fmt.Printf("$u_{%s} = 0$ \\\\ \n", destination)
+	}
+	if Verbose {
+		for id := 0; id < n; id++ {
+			fmt.Printf("$f_{%s} = 0$ \\\\ \n", nName[id])
+			if id == destID {
+				fmt.Printf("$u_{%s} = 0$ \\\\ \n", nName[id])
+			} else {
+				fmt.Printf("$u_{%s} = Infinity$ \\\\ \n", nName[id])
 			}
-			u[stop] = 0.0
-			continue
 		}
-		if Verbose {
-			fmt.Printf("$u_{%s} = Infinity$ \\\\ \n", stop)
-		}
-		u[stop] = math.Inf(+1)
 	}
 
-	overlineA := make([]*Link, 0, len(allLinks)/2)
-	// Positions of each node's basket links inside overlineA, so that a
-	// no-wait link can replace the whole basket. Replaced entries are set
-	// to nil and compacted at the end.
-	aSetIdx := make(map[string][]int)
+	// overlineA holds accepted link indices in acceptance order; a no-wait
+	// link replaces a node's whole basket, and replaced slots become -1 and
+	// are compacted at the end. aSetIdx[node] are that node's positions in
+	// overlineA.
+	overlineA := make([]int, 0, m/2)
+	aSetIdx := make([][]int, n)
 
-	linksByToNode := make(map[string][]*Link)
-	for _, link := range allLinks {
-		linksByToNode[link.ToNode] = append(linksByToNode[link.ToNode], link)
+	// Adjacency by head node: the link indices whose ToNode == node, so that
+	// when u[node] improves exactly those incoming links are re-keyed.
+	adjByTo := make([][]int, n)
+	for k := 0; k < m; k++ {
+		adjByTo[lTo[k]] = append(adjByTo[lTo[k]], k)
 	}
 
-	entries := make(map[string][]*pqEntry, len(allLinks))
-	pq := make(PriorityQueue, 0, len(allLinks))
-	for _, link := range allLinks {
-		entry := &pqEntry{
-			link:     link,
-			priority: u[link.ToNode] + link.TravelCost,
+	// One priority-queue entry per link, in a single backing slab (one
+	// allocation for all m entries instead of m); &slab[k] reaches a link's
+	// entry directly in the update step, with no scan.
+	slab := make([]pqEntry, m)
+	pq := make(PriorityQueue, 0, m)
+	for k := 0; k < m; k++ {
+		slab[k] = pqEntry{
+			link:     k,
+			priority: u[lTo[k]] + lCost[k],
 		}
-		entries[link.FromNode] = append(entries[link.FromNode], entry)
-		pq = append(pq, entry)
+		pq = append(pq, &slab[k])
 	}
 	pq.Init()
 	if Verbose {
@@ -87,14 +131,14 @@ func FindOptimalStrategy(allLinks []*Link, allStops map[string]struct{}, destina
 		if math.IsInf(entry.priority, 1) {
 			break
 		}
-		a := entry.link
-		i := a.FromNode
-		j := a.ToNode
-		sumUC := u[j] + a.TravelCost
+		k := entry.link
+		i := lFrom[k]
+		j := lTo[k]
+		sumUC := u[j] + lCost[k]
 
 		/* 1.3 Update node label */
 		if Verbose {
-			fmt.Printf("Process: $a = (i, j) = (%s, %s)$, \\\\ \n", i, j)
+			fmt.Printf("Process: $a = (i, j) = (%s, %s)$, \\\\ \n", nName[i], nName[j])
 		}
 		// A node already served by a no-wait link is final: the no-wait
 		// link absorbs all flow (its share f_a/f_i is 1 in the limit),
@@ -132,9 +176,9 @@ func FindOptimalStrategy(allLinks []*Link, allStops map[string]struct{}, destina
 			continue
 		}
 		if Verbose {
-			fmt.Printf("\\quad $u_i \\leq u_j + c_a : %v \\leq %v + %v$ - FALSE \\\\ \n", u[i], u[j], a.TravelCost)
+			fmt.Printf("\\quad $u_i \\leq u_j + c_a : %v \\leq %v + %v$ - FALSE \\\\ \n", u[i], u[j], lCost[k])
 		}
-		if a.Headway <= 0 {
+		if lHead[k] <= 0 {
 			// No-wait link (infinite frequency): the modified step 1.3
 			// given by the paper on p. 96 - the exact limit of the label
 			// update formula as f_a -> inf. The link replaces the whole
@@ -143,16 +187,16 @@ func FindOptimalStrategy(allLinks []*Link, allStops map[string]struct{}, destina
 			u[i] = sumUC
 			f[i] = math.Inf(+1)
 			for _, idx := range aSetIdx[i] {
-				overlineA[idx] = nil
+				overlineA[idx] = -1
 			}
 			aSetIdx[i] = aSetIdx[i][:0]
-			overlineA = append(overlineA, a)
+			overlineA = append(overlineA, k)
 			aSetIdx[i] = append(aSetIdx[i], len(overlineA)-1)
 			if Verbose {
-				fmt.Printf("\\quad no-wait link: $u_i = u_j + c_a = %v$, $f_i = \\infty$, basket replaced by $(%s, %s)$ \\\\ \n", u[i], i, j)
+				fmt.Printf("\\quad no-wait link: $u_i = u_j + c_a = %v$, $f_i = \\infty$, basket replaced by $(%s, %s)$ \\\\ \n", u[i], nName[i], nName[j])
 			}
 		} else {
-			freq := 1.0 / a.Headway
+			freq := 1.0 / lHead[k]
 			if Verbose {
 				fmt.Printf("\\quad $f_a = %v$ \\\\ \n", freq)
 				fmt.Printf("\\quad $u_j + c_a = %v$ \\\\ \n", sumUC)
@@ -165,30 +209,22 @@ func FindOptimalStrategy(allLinks []*Link, allStops map[string]struct{}, destina
 				u[i] = (f[i]*u[i] + freq*sumUC) / (f[i] + freq)
 			}
 			f[i] += freq
-			overlineA = append(overlineA, a)
+			overlineA = append(overlineA, k)
 			aSetIdx[i] = append(aSetIdx[i], len(overlineA)-1)
 			if Verbose {
 				fmt.Printf("\\quad$u_i = \\frac{f_i * u_i + f_a * (u_j + c_a)}{f_i + f_a} = %v$, $f_i = %v$ \\\\ \n", u[i], f[i])
-				fmt.Printf("\\quad $\\overline{A} = \\overline{A} \\cup {(%s, %s)}$ \\\\ \n", i, j)
+				fmt.Printf("\\quad $\\overline{A} = \\overline{A} \\cup {(%s, %s)}$ \\\\ \n", nName[i], nName[j])
 			}
 		}
 
-		if linksToUpdate, exists := linksByToNode[i]; exists {
-			for _, link := range linksToUpdate {
-				if iEntries, hasEntries := entries[link.FromNode]; hasEntries {
-					for _, entry := range iEntries {
-						if entry.link.ToNode == i && entry.link.FromNode == link.FromNode {
-							pq.update(entry, u[i]+link.TravelCost)
-							break
-						}
-					}
-				}
-			}
+		// u[i] improved: re-key exactly the links entering i.
+		for _, kk := range adjByTo[i] {
+			pq.update(&slab[kk], u[i]+lCost[kk])
 		}
 		if Verbose {
 			fmt.Println("Node labels: \\\\")
-			for s := range allStops {
-				fmt.Printf("$%s -> (u_i, f_i) = (%v, %v)$ \\\\ \n", s, u[s], f[s])
+			for id := 0; id < n; id++ {
+				fmt.Printf("$%s -> (u_i, f_i) = (%v, %v)$ \\\\ \n", nName[id], u[id], f[id])
 			}
 		}
 	}
@@ -196,15 +232,24 @@ func FindOptimalStrategy(allLinks []*Link, allStops map[string]struct{}, destina
 	// Compact the attractive set: drop entries replaced by no-wait links.
 	// The append order is preserved, i.e. non-decreasing u_j + c_a.
 	aSet := make([]*Link, 0, len(overlineA))
-	for _, link := range overlineA {
-		if link != nil {
-			aSet = append(aSet, link)
+	for _, k := range overlineA {
+		if k >= 0 {
+			aSet = append(aSet, allLinks[k])
 		}
 	}
 
+	// Translate the arena labels/freqs back to the public string-keyed maps,
+	// for the allStops key set only.
+	labels := make(map[string]float64, nStops)
+	freqs := make(map[string]float64, nStops)
+	for id := 0; id < nStops; id++ {
+		labels[nName[id]] = u[id]
+		freqs[nName[id]] = f[id]
+	}
+
 	strategy := &Strategy{
-		Labels: u,
-		Freqs:  f,
+		Labels: labels,
+		Freqs:  freqs,
 		ASet:   aSet,
 	}
 	return strategy
